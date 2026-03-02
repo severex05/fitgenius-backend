@@ -14,8 +14,30 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
-// Middlewares
-app.use(cors());
+// CORS: permite localhost (dev) e seu front em produção (ajuste quando tiver domínio)
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:8081',
+  'https://fitgenius-backend-production-e5ac.up.railway.app', // se um dia servir front daqui
+  // depois você adiciona aqui: 'https://seu-front-na-vercel.vercel.app'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // origin === undefined em chamadas tipo Postman/cURL
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn('[CORS] Origem não permitida:', origin);
+      callback(new Error('Not allowed by CORS: ' + origin));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Rota de saúde
@@ -23,6 +45,7 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
     message: 'Backend FitGenius está rodando!',
+    porta: PORT,
   });
 });
 
@@ -77,7 +100,6 @@ app.post('/api/gerar-treino', async (req, res) => {
     const content = openaiResponse.data.choices[0].message.content;
     console.log('[TREINO] Resposta:', content);
 
-    // AQUI: supomos que a OpenAI já mandou JSON puro
     const treinoGerado = JSON.parse(content);
 
     return res.json({ sucesso: true, treino: treinoGerado });
@@ -245,7 +267,7 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
   }
 });
 
-// ================== INICIO DO SERVIDOR ==================
+// ================== INÍCIO DO SERVIDOR ==================
 app.listen(PORT, () => {
   console.log('Backend FitGenius rodando!');
   console.log('URL: http://localhost:' + PORT);
