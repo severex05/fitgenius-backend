@@ -1,57 +1,60 @@
 // server.js
-require('dotenv').config();
+require('dotenv').config(); // Carrega variáveis de ambiente do .env
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer');
-const axios = require('axios');
+const multer = require('multer'); // Para lidar com upload de arquivos
+const axios = require('axios'); // Para fazer requisições HTTP (para a OpenAI)
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const apiKey = process.env.OPENAI_API_KEY; // Usando apiKey para consistência
+const apiKey = process.env.OPENAI_API_KEY; // Chave da OpenAI
 
-// ===== Multer: guarda em memória (buffer), não em arquivo =====
+// ===== Multer: Configura para guardar arquivos em memória (buffer) =====
+// Isso é importante para que o backend possa ler a imagem e enviar para a OpenAI
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  storage: multer.memoryStorage(), // Armazena o arquivo na memória RAM
+  limits: { fileSize: 10 * 1024 * 1024 }, // Limite de 10MB por arquivo
 });
 
-// ===== CORS: permite localhost (dev) e seu front em desenvolvimento/produção. =====
-// AJUSTEI para seu IP 192.168.15.18 e portas do Expo.
+// ===== CORS: Configuração para permitir requisições de diferentes origens =====
+// Ajustado para incluir seu IP local e as portas do Expo, além do backend de produção.
 const allowedOrigins = [
-  'http://localhost:3000', // Backend local
-  'http://localhost:8081', // Expo Web no mesmo PC
-  'http://192.168.15.18:8081', // Expo Web/PWA acessando do celular
-  'http://192.168.15.18:19000', // Expo Go (porta padrão)
-  'http://192.168.15.18:19006', // Expo Go (outra porta possível)
-  'https://fitgenius-backend-production-e5ac.up.railway.app', // Seu backend em produção
-  // Adicione aqui outros domínios de frontend em produção se houver
+  'http://localhost:3000', // Seu backend local
+  'http://localhost:8081', // Expo Web/PWA rodando no mesmo PC
+  'http://192.168.15.18:8081', // Expo Web/PWA acessando do celular (seu IP)
+  'http://192.168.15.18:19000', // Expo Go (porta padrão) acessando do celular (seu IP)
+  'http://192.168.15.18:19006', // Expo Go (outra porta possível) acessando do celular (seu IP)
+  'https://fitgenius-backend-production-e5ac.up.railway.app', // Seu backend em produção na Railway
+  // Adicione aqui outros domínios de frontend em produção se houver (ex: Vercel, Netlify)
   // 'https://seu-frontend-em-producao.com',
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permite requisições sem 'origin' (ex: de apps nativos ou Postman)
+    // Permite requisições sem 'origin' (ex: de apps nativos, Postman, ou algumas ferramentas de teste)
     if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+      callback(null, true); // Permite a requisição
     } else {
       console.warn('[CORS] Origem não permitida:', origin);
-      callback(new Error('Not allowed by CORS: ' + origin));
+      callback(new Error('Not allowed by CORS: ' + origin)); // Bloqueia a requisição
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Métodos HTTP permitidos
+  allowedHeaders: ['Content-Type', 'Authorization'], // Cabeçalhos permitidos
+  credentials: true, // Permite o envio de cookies e cabeçalhos de autorização
 };
 
-app.use(cors(corsOptions)); // Aplica as opções de CORS
-app.use(express.json()); // Middleware para parsear JSON
+app.use(cors(corsOptions)); // Aplica as opções de CORS a todas as rotas
+app.use(express.json()); // Middleware para parsear o corpo das requisições em formato JSON
 
-// ===== Health check =====
+// ===== Rota de Saúde (Health Check) =====
+// Usada para verificar se o servidor está online e respondendo
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Backend FitGenius rodando!' });
+  res.json({ status: 'ok', message: 'Backend FitGenius está rodando!' });
 });
 
 // ================== ROTA: ANALISAR IMAGEM DA REFEIÇÃO ==================
+// Recebe uma imagem, envia para a OpenAI Vision e retorna a análise nutricional
 app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -60,7 +63,7 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
         .json({ sucesso: false, error: 'Nenhuma imagem enviada.' });
     }
 
-    if (!apiKey) { // Usando apiKey para consistência
+    if (!apiKey) {
       return res
         .status(500)
         .json({ sucesso: false, error: 'OPENAI_API_KEY não configurada.' });
@@ -73,16 +76,16 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
       'bytes'
     );
 
-    // buffer -> base64
+    // Converte o buffer da imagem para base64, formato exigido pela OpenAI Vision
     const base64Image = req.file.buffer.toString('base64');
-    const mimeType = req.file.mimetype || 'image/jpeg';
+    const mimeType = req.file.mimetype || 'image/jpeg'; // Garante um MIME type
 
     console.log('[IMAGEM] Chamando OpenAI Vision...');
 
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o',
+        model: 'gpt-4o', // Modelo da OpenAI para visão
         messages: [
           {
             role: 'user',
@@ -90,50 +93,51 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
               {
                 type: 'text',
                 text: `Analise esta imagem de refeição e identifique todos os alimentos visíveis.
-Para cada alimento, estime quantidades em gramas e macronutrientes.
+Para cada alimento, estime quantidades em gramas e macronutrientes (calorias, proteínas, carboidratos, gorduras).
 Responda APENAS com JSON válido no formato:
 {
   "alimentos": [
     {
       "nome": "nome do alimento",
-      "quantidade": 150,
+      "quantidade": 150, // em gramas
       "calorias": 200,
-      "proteinas": 25,
-      "carboidratos": 10,
-      "gorduras": 8
+      "proteinas": 25, // em gramas
+      "carboidratos": 10, // em gramas
+      "gorduras": 8 // em gramas
     }
   ],
   "totalCalorias": 200,
   "totalProteinas": 25,
   "totalCarboidratos": 10,
   "totalGorduras": 8,
-  "observacao": "observação opcional"
+  "observacao": "observação opcional sobre a refeição"
 }`,
               },
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:${mimeType};base64,${base64Image}`,
-                  detail: 'high',
+                  url: `data:${mimeType};base64,${base64Image}`, // Imagem em base64
+                  detail: 'high', // Detalhe da imagem (low, high, auto)
                 },
               },
             ],
           },
         ],
-        max_tokens: 1000,
+        max_tokens: 1000, // Limite de tokens na resposta da IA
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`, // Usando apiKey
+          Authorization: `Bearer ${apiKey}`, // Autenticação com a chave da OpenAI
           'Content-Type': 'application/json',
         },
-        timeout: 60000,
+        timeout: 60000, // Timeout de 60 segundos para a requisição
       }
     );
 
     const content = openaiResp.data.choices[0].message.content || '';
-    console.log('[IMAGEM] Resposta bruta:', content);
+    console.log('[IMAGEM] Resposta bruta da OpenAI:', content);
 
+    // Extrai o JSON da resposta, caso a IA adicione texto extra
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return res.status(500).json({
@@ -163,9 +167,10 @@ Responda APENAS com JSON válido no formato:
 });
 
 // ================== ROTA: GERAR TREINO ==================
+// Gera um plano de treino personalizado com base no perfil do usuário
 app.post('/api/generate-workout', async (req, res) => {
   try {
-    const { userProfile } = req.body;
+    const { userProfile } = req.body; // Recebe o perfil do usuário do frontend
 
     if (!userProfile) {
       return res
@@ -173,12 +178,15 @@ app.post('/api/generate-workout', async (req, res) => {
         .json({ error: 'Perfil do usuário não fornecido.' });
     }
 
-    if (!apiKey) { // Usando apiKey para consistência
+    if (!apiKey) {
       return res
         .status(500)
         .json({ error: 'OPENAI_API_KEY não configurada.' });
     }
 
+    console.log('[TREINO] Chamando OpenAI...');
+
+    // Monta o prompt para a IA com os dados do perfil do usuário
     const prompt = `Crie um plano de treino personalizado para:
 - Nome: ${userProfile.nome}
 - Objetivo: ${userProfile.objetivo}
@@ -187,6 +195,7 @@ app.post('/api/generate-workout', async (req, res) => {
 - Altura: ${userProfile.altura}cm
 - Idade: ${userProfile.idade} anos
 - Sexo: ${userProfile.sexo}
+- Frequência de treino: ${userProfile.frequenciaTreino || '3-4 vezes por semana'}
 
 Responda APENAS com um JSON válido no seguinte formato:
 {
@@ -201,7 +210,7 @@ Responda APENAS com um JSON válido no seguinte formato:
           "series": "4",
           "repeticoes": "10-12",
           "descanso": "60s",
-          "descricao": "Deite no banco..."
+          "descricao": "Deite no banco, segure a barra..."
         }
       ]
     }
@@ -211,33 +220,36 @@ Responda APENAS com um JSON válido no seguinte formato:
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o',
+        model: 'gpt-4o', // Modelo da OpenAI
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 3000,
+        max_tokens: 3000, // Limite de tokens na resposta
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`, // Usando apiKey
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
+        timeout: 60000,
       }
     );
 
     const content = openaiResp.data.choices[0].message.content || '';
+    console.log('[TREINO] Resposta bruta da OpenAI:', content);
+
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return res
         .status(500)
-        .json({ error: 'Erro ao interpretar resposta da IA.' });
+        .json({ error: 'Erro ao interpretar resposta da IA para o treino.' });
     }
 
     const plano = JSON.parse(jsonMatch[0]);
-    res.json(plano);
+    res.json(plano); // Retorna o plano de treino
   } catch (error) {
     console.error('[ERRO TREINO]', error.message);
     if (error.response) {
-      console.error('Status:', error.response.status);
-      console.error('Data:', error.response.data);
+      console.error('Status OpenAI:', error.response.status);
+      console.error('Data OpenAI:', error.response.data);
       return res.status(500).json({
         error:
           error.response.data?.error?.message ||
@@ -249,6 +261,7 @@ Responda APENAS com um JSON válido no seguinte formato:
 });
 
 // ================== ROTA: GERAR METAS NUTRICIONAIS ==================
+// Gera metas nutricionais diárias com base no perfil do usuário
 app.post('/api/gerar-metas-nutricionais', async (req, res) => {
   try {
     const { userProfile } = req.body; // O app envia o userProfile completo
@@ -260,7 +273,7 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
       });
     }
 
-    if (!apiKey) { // Usando apiKey para consistência
+    if (!apiKey) {
       return res.status(500).json({
         sucesso: false,
         error: 'Chave da OpenAI não configurada.',
@@ -271,10 +284,9 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
 
     // Monta o prompt com base no userProfile
     const prompt = `Com base no seguinte perfil de usuário, gere metas nutricionais diárias (calorias, proteínas, carboidratos, gorduras) e uma breve explicação.
-
-    Perfil do Usuário:
+    Perfil:
     - Nome: ${userProfile.nome}
-    - Idade: ${userProfile.idade} anos
+    - Idade: ${userProfile.idade}
     - Sexo: ${userProfile.sexo}
     - Altura: ${userProfile.altura} cm
     - Peso: ${userProfile.peso} kg
@@ -310,7 +322,7 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`, // Usando apiKey
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
         timeout: 60000,
@@ -318,7 +330,7 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
     );
 
     const content = openaiResp.data.choices[0].message.content || '';
-    console.log('[METAS NUTRICIONAIS] Resposta bruta:', content);
+    console.log('[METAS NUTRICIONAIS] Resposta bruta da OpenAI:', content);
 
     // Regex para extrair o JSON, caso a IA adicione texto extra
     const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -352,7 +364,7 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
   }
 });
 
-// ===== Inicia servidor =====
+// ===== Inicia o servidor =====
 app.listen(PORT, () => {
   console.log(`Backend FitGenius rodando!`);
   console.log(`URL: http://localhost:${PORT}`);
