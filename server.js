@@ -19,7 +19,7 @@ const upload = multer({
 // ===== CORS: Configuração para permitir requisições de diferentes origens =====
 // Ajustado para incluir seu IP local e as portas do Expo, além do backend de produção.
 const allowedOrigins = [
-  'http://localhost:3000', // Seu backend local
+  'http://localhost:3000', // Seu backend local (se você ainda quiser rodar ele)
   'http://localhost:8081', // Expo Web/PWA rodando no mesmo PC
   'http://192.168.15.18:8081', // Expo Web/PWA acessando do celular (seu IP)
   'http://192.168.15.18:19000', // Expo Go (porta padrão) acessando do celular (seu IP)
@@ -85,7 +85,7 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o', // Modelo da OpenAI para visão
+        model: 'gpt-4o', // Modelo mais avançado para visão
         messages: [
           {
             role: 'user',
@@ -93,17 +93,17 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
               {
                 type: 'text',
                 text: `Analise esta imagem de refeição e identifique todos os alimentos visíveis.
-Para cada alimento, estime quantidades em gramas e macronutrientes (calorias, proteínas, carboidratos, gorduras).
-Responda APENAS com JSON válido no formato:
+Para cada alimento, estime as quantidades em gramas e os macronutrientes (calorias, proteínas, carboidratos, gorduras).
+Responda APENAS com um JSON válido no seguinte formato, sem texto adicional ou markdown:
 {
   "alimentos": [
     {
       "nome": "nome do alimento",
-      "quantidade": 150, // em gramas
+      "quantidade": 150,
       "calorias": 200,
-      "proteinas": 25, // em gramas
-      "carboidratos": 10, // em gramas
-      "gorduras": 8 // em gramas
+      "proteinas": 25,
+      "carboidratos": 10,
+      "gorduras": 8
     }
   ],
   "totalCalorias": 200,
@@ -116,28 +116,28 @@ Responda APENAS com JSON válido no formato:
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:${mimeType};base64,${base64Image}`, // Imagem em base64
-                  detail: 'high', // Detalhe da imagem (low, high, auto)
+                  url: `data:${mimeType};base64,${base64Image}`,
+                  detail: 'high', // Detalhe 'high' para melhor análise
                 },
               },
             ],
           },
         ],
-        max_tokens: 1000, // Limite de tokens na resposta da IA
+        max_tokens: 1000, // Limite de tokens para a resposta da IA
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`, // Autenticação com a chave da OpenAI
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 60000, // Timeout de 60 segundos para a requisição
+        timeout: 60000, // Timeout de 60 segundos para a requisição da OpenAI
       }
     );
 
     const content = openaiResp.data.choices[0].message.content || '';
     console.log('[IMAGEM] Resposta bruta da OpenAI:', content);
 
-    // Extrai o JSON da resposta, caso a IA adicione texto extra
+    // Regex para extrair o JSON, caso a IA adicione texto extra (ex: ```json ... ```)
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return res.status(500).json({
@@ -148,11 +148,12 @@ Responda APENAS com JSON válido no formato:
 
     const resultado = JSON.parse(jsonMatch[0]);
     return res.json({ sucesso: true, ...resultado });
+
   } catch (error) {
     console.error('[ERRO IMAGEM]', error.message);
     if (error.response) {
       console.error('Status OpenAI:', error.response.status);
-      console.error('Data OpenAI:', error.response.data);
+      console.error('Data OpenAI:', JSON.stringify(error.response.data));
       return res.status(500).json({
         sucesso: false,
         error:
@@ -160,33 +161,26 @@ Responda APENAS com JSON válido no formato:
           'Erro na API da OpenAI ao analisar imagem.',
       });
     }
-    return res
-      .status(500)
-      .json({ sucesso: false, error: 'Erro interno no servidor.' });
+    res.status(500).json({ sucesso: false, error: 'Erro interno no servidor.' });
   }
 });
 
-// ================== ROTA: GERAR TREINO ==================
+// ================== ROTA: GERAR PLANO DE TREINO ==================
 // Gera um plano de treino personalizado com base no perfil do usuário
 app.post('/api/generate-workout', async (req, res) => {
   try {
-    const { userProfile } = req.body; // Recebe o perfil do usuário do frontend
+    const { userProfile } = req.body;
 
     if (!userProfile) {
-      return res
-        .status(400)
-        .json({ error: 'Perfil do usuário não fornecido.' });
+      return res.status(400).json({ error: 'Perfil do usuário não fornecido.' });
     }
 
     if (!apiKey) {
-      return res
-        .status(500)
-        .json({ error: 'OPENAI_API_KEY não configurada.' });
+      return res.status(500).json({ error: 'OPENAI_API_KEY não configurada.' });
     }
 
     console.log('[TREINO] Chamando OpenAI...');
 
-    // Monta o prompt para a IA com os dados do perfil do usuário
     const prompt = `Crie um plano de treino personalizado para:
 - Nome: ${userProfile.nome}
 - Objetivo: ${userProfile.objetivo}
@@ -195,9 +189,8 @@ app.post('/api/generate-workout', async (req, res) => {
 - Altura: ${userProfile.altura}cm
 - Idade: ${userProfile.idade} anos
 - Sexo: ${userProfile.sexo}
-- Frequência de treino: ${userProfile.frequenciaTreino || '3-4 vezes por semana'}
 
-Responda APENAS com um JSON válido no seguinte formato:
+Responda APENAS com um JSON válido no seguinte formato, sem texto adicional ou markdown:
 {
   "dataGeracao": "${new Date().toISOString()}",
   "dias": [
@@ -210,7 +203,7 @@ Responda APENAS com um JSON válido no seguinte formato:
           "series": "4",
           "repeticoes": "10-12",
           "descanso": "60s",
-          "descricao": "Deite no banco, segure a barra..."
+          "descricao": "Deite no banco, segure a barra na largura dos ombros"
         }
       ]
     }
@@ -220,9 +213,9 @@ Responda APENAS com um JSON válido no seguinte formato:
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o', // Modelo da OpenAI
+        model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 3000, // Limite de tokens na resposta
+        max_tokens: 3000,
       },
       {
         headers: {
@@ -238,22 +231,19 @@ Responda APENAS com um JSON válido no seguinte formato:
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return res
-        .status(500)
-        .json({ error: 'Erro ao interpretar resposta da IA para o treino.' });
+      return res.status(500).json({ error: 'Erro ao interpretar resposta da IA.' });
     }
 
     const plano = JSON.parse(jsonMatch[0]);
-    res.json(plano); // Retorna o plano de treino
+    res.json(plano);
+
   } catch (error) {
     console.error('[ERRO TREINO]', error.message);
     if (error.response) {
       console.error('Status OpenAI:', error.response.status);
-      console.error('Data OpenAI:', error.response.data);
+      console.error('Data OpenAI:', JSON.stringify(error.response.data));
       return res.status(500).json({
-        error:
-          error.response.data?.error?.message ||
-          'Erro na API da OpenAI ao gerar treino.',
+        error: error.response.data?.error?.message || 'Erro na API da OpenAI ao gerar treino.',
       });
     }
     res.status(500).json({ error: 'Erro interno no servidor.' });
