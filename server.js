@@ -1,21 +1,21 @@
 // server.js
-require('dotenv').config(); // Carrega variáveis de ambiente do .env
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer'); // Para lidar com upload de arquivos
-const axios = require('axios'); // Para fazer requisições HTTP (para a OpenAI)
+const multer = require('multer');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const apiKey = process.env.OPENAI_API_KEY; // Chave da OpenAI
+const apiKey = process.env.OPENAI_API_KEY;
 
-// ===== Multer: Configura para guardar arquivos em memória (buffer) =====
+// ---------- Multer (upload em memória) ----------
 const upload = multer({
-  storage: multer.memoryStorage(), // Armazena o arquivo na memória RAM
-  limits: { fileSize: 10 * 1024 * 1024 }, // Limite de 10MB por arquivo
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-// ===== CORS =====
+// ---------- CORS ----------
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:8081',
@@ -23,8 +23,8 @@ const allowedOrigins = [
   'http://192.168.15.18:19000',
   'http://192.168.15.18:19006',
   'https://fitgenius-backend-production-e5ac.up.railway.app',
-  // coloque aqui depois o domínio do Vercel, tipo:
-  // 'https://fitgenius.vercel.app',
+  // depois adicione aqui o domínio do Vercel:
+  // 'https://SEU-APP.vercel.app',
 ];
 
 const corsOptions = {
@@ -44,12 +44,14 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// ===== Health check =====
+// ---------- Health check ----------
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend FitGenius rodando!' });
 });
 
-// ===== Rota: ANALISAR IMAGEM DA REFEIÇÃO (VERSÃO ANTIGA, QUE FUNCIONAVA) =====
+// ===================================================
+// ROTA: ANALISAR IMAGEM DA REFEIÇÃO  (VERSÃO QUE JÁ FUNCIONAVA)
+// ===================================================
 app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -65,13 +67,12 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
       });
     }
 
-    // Converte o buffer da imagem para base64
     const base64Image = req.file.buffer.toString('base64');
 
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o', // Modelo da OpenAI para visão
+        model: 'gpt-4o',
         messages: [
           {
             role: 'system',
@@ -84,7 +85,9 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
               { type: 'text', text: 'Quais alimentos estão nesta imagem?' },
               {
                 type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${base64Image}` },
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Image}`,
+                },
               },
             ],
           },
@@ -97,14 +100,13 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 60000, // Aumenta o timeout para a API da OpenAI
+        timeout: 60000,
       }
     );
 
     const content = openaiResp.data.choices[0].message.content || '';
     console.log('[ANÁLISE IMAGEM] Resposta bruta da OpenAI:', content);
 
-    // Regex para extrair o JSON, caso a IA adicione texto extra
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return res.status(500).json({
@@ -114,7 +116,7 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
     }
 
     const analise = JSON.parse(jsonMatch[0]);
-    res.json({ sucesso: true, analise });
+    return res.json({ sucesso: true, analise });
   } catch (error) {
     console.error('[ERRO ANÁLISE IMAGEM]', error.message);
     if (error.response) {
@@ -127,7 +129,7 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
           'Erro na API da OpenAI ao analisar imagem.',
       });
     }
-    res.status(500).json({
+    return res.status(500).json({
       sucesso: false,
       error: 'Erro interno no servidor ao analisar imagem.',
       detalhes: error.message,
@@ -135,7 +137,9 @@ app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
   }
 });
 
-// ===== Rota: GERAR TREINO (a mesma que você já tinha) =====
+// ===================================================
+// ROTA: GERAR TREINO
+// ===================================================
 app.post('/api/generate-workout', async (req, res) => {
   try {
     const { userProfile } = req.body;
@@ -156,7 +160,8 @@ app.post('/api/generate-workout', async (req, res) => {
     Gere um plano de treino semanal detalhado, no formato JSON, para o seguinte perfil de usuário, com foco em ganho de massa muscular.
     O plano deve ser para 5 dias na semana, com exercícios, séries, repetições e descanso.
     Inclua um aquecimento e alongamento final.
-    Responda APENAS com um JSON válido, sem markdown. O JSON deve conter as chaves: "titulo" (string), "dias" (array de objetos), "aquecimento" (string), "alongamento" (string).
+    Responda APENAS com um JSON válido, sem markdown. 
+    O JSON deve conter as chaves: "titulo" (string), "dias" (array de objetos), "aquecimento" (string), "alongamento" (string).
     Cada objeto em "dias" deve ter "dia" (string, ex: "Dia 1 - Peito e Tríceps"), "foco" (string), "exercicios" (array de objetos).
     Cada objeto em "exercicios" deve ter "nome" (string), "series" (string), "repeticoes" (string), "descanso" (string).
 
@@ -170,7 +175,149 @@ app.post('/api/generate-workout', async (req, res) => {
     - Nível de treino: ${userProfile.nivelTreino}
     - Frequência de treino: ${userProfile.frequenciaTreino}
     - Equipamentos disponíveis: ${userProfile.equipamentosDisponiveis.join(
-      ', ',
+      ', '
     )}
-    - Restrições/Lesões: ${userProfile.restricoesLesoes || 'Nen
+    - Restrições/Lesões: ${userProfile.restricoesLesoes || 'Nenhuma'}
+    `;
 
+    const openaiResp = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Você é um personal trainer virtual. Crie planos de treino personalizados.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 2000,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      }
+    );
+
+    const content = openaiResp.data.choices[0].message.content || '';
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res
+        .status(500)
+        .json({ error: 'Erro ao interpretar resposta da IA.' });
+    }
+
+    const plano = JSON.parse(jsonMatch[0]);
+    return res.json(plano);
+  } catch (error) {
+    console.error('[ERRO TREINO]', error.message);
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', error.response.data);
+      return res.status(500).json({
+        error:
+          error.response.data?.error?.message ||
+          'Erro na API da OpenAI ao gerar treino.',
+      });
+    }
+    return res.status(500).json({ error: 'Erro interno no servidor.' });
+  }
+});
+
+// ===================================================
+// ROTA: GERAR METAS NUTRICIONAIS  (usando prompt do front)
+// ===================================================
+app.post('/api/gerar-metas-nutricionais', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({
+        sucesso: false,
+        error: 'Prompt não fornecido para gerar metas nutricionais.',
+      });
+    }
+
+    if (!apiKey) {
+      return res.status(500).json({
+        sucesso: false,
+        error: 'Chave da OpenAI não configurada.',
+      });
+    }
+
+    console.log('[METAS NUTRICIONAIS] Prompt recebido:', prompt);
+
+    const openaiResp = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Você é um nutricionista virtual. Calcule metas nutricionais diárias e forneça uma breve explicação. Responda APENAS com JSON válido, sem markdown. O JSON deve conter as chaves: calorias (number), proteinas (number), carboidratos (number), gorduras (number) e explicacao (string).',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      }
+    );
+
+    const content = openaiResp.data.choices[0].message.content || '';
+    console.log('[METAS NUTRICIONAIS] Resposta bruta da OpenAI:', content);
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.status(500).json({
+        sucesso: false,
+        error: 'Não foi possível interpretar a resposta da IA para as metas.',
+      });
+    }
+
+    const metasNutricionais = JSON.parse(jsonMatch[0]);
+    return res.json({ sucesso: true, metas: metasNutricionais });
+  } catch (error) {
+    console.error('[ERRO METAS NUTRICIONAIS]', error.message);
+    if (error.response) {
+      console.error('Status OpenAI:', error.response.status);
+      console.error('Data OpenAI:', error.response.data);
+      return res.status(500).json({
+        sucesso: false,
+        error:
+          error.response.data?.error?.message ||
+          'Erro na API da OpenAI ao gerar metas nutricionais.',
+      });
+    }
+    return res.status(500).json({
+      sucesso: false,
+      error: 'Erro interno no servidor ao gerar metas nutricionais.',
+      detalhes: error.message,
+    });
+  }
+});
+
+// ---------- Inicia o servidor ----------
+app.listen(PORT, () => {
+  console.log(`Backend FitGenius rodando!`);
+  console.log(`URL local: http://localhost:${PORT}`);
+  console.log(`Health: http://localhost:${PORT}/api/health`);
+});
