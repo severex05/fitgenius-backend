@@ -1,27 +1,25 @@
 // server.js
-require('dotenv').config(); // Carrega variáveis de ambiente do .env
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer'); // Upload de arquivos (imagem)
-const axios = require('axios'); // HTTP para OpenAI
+const multer = require('multer');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
 
-// ---------- Multer (upload em memória) ----------
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ---------- Middlewares ----------
 app.use(cors());
 app.use(express.json());
 
-// ---------- Health Check ----------
+// ---------- Health ----------
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'Backend FitGenius está online!' });
 });
 
-// ---------- Rota: GERAR METAS NUTRICIONAIS ----------
+// ---------- Metas Nutricionais ----------
 app.post('/api/gerar-metas-nutricionais', async (req, res) => {
   const { prompt } = req.body;
 
@@ -37,8 +35,6 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
   }
 
   try {
-    console.log('[METAS NUTRICIONAIS] Prompt recebido:', prompt);
-
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -68,7 +64,6 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error('Falha ao extrair JSON da resposta de metas');
       return res.status(500).json({
         sucesso: false,
         error: 'Não foi possível interpretar a resposta da IA para as metas nutricionais.',
@@ -80,8 +75,6 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
   } catch (error) {
     console.error('[ERRO GERAR METAS]', error.message);
     if (error.response) {
-      console.error('Status OpenAI:', error.response.status);
-      console.error('Data OpenAI:', error.response.data);
       return res.status(500).json({
         sucesso: false,
         error:
@@ -97,52 +90,48 @@ app.post('/api/gerar-metas-nutricionais', async (req, res) => {
   }
 });
 
-// ---------- Rota: ANALISAR IMAGEM ----------
+// ---------- Analisar Imagem ----------
 app.post('/api/analyze-image', upload.single('image'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ sucesso: false, error: 'Nenhuma imagem enviada.' });
-  }
-
-  if (!apiKey) {
-    console.error('OPENAI_API_KEY não configurada.');
-    return res
-      .status(500)
-      .json({ sucesso: false, error: 'Chave da API OpenAI não configurada no servidor.' });
-  }
-
   try {
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ sucesso: false, error: 'Arquivo de imagem não enviado.' });
+    }
+
+    if (!apiKey) {
+      console.error('OPENAI_API_KEY não configurada.');
+      return res
+        .status(500)
+        .json({ sucesso: false, error: 'Chave da API OpenAI não configurada no servidor.' });
+    }
+
     const base64Image = req.file.buffer.toString('base64');
-
-    const prompt = `Analise esta imagem de uma refeição. Identifique os alimentos presentes, estime suas quantidades em gramas (g) e, para cada alimento, forneça uma estimativa de calorias, proteínas, carboidratos e gorduras.
-Se não conseguir identificar um alimento, omita-o. Se não houver comida, retorne um array vazio.
-
-Responda APENAS com JSON válido, sem markdown, no formato:
-{
-  "alimentos": [
-    { "nome": "nome do alimento", "quantidade": number, "calorias": number, "proteinas": number, "carboidratos": number, "gorduras": number }
-  ]
-}`;
 
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o',
+        model: 'gpt-4o-mini',
         messages: [
+          {
+            role: 'system',
+            content:
+              'Você é um nutricionista que analisa imagens de refeições. Identifique os alimentos, estime quantidade em gramas e valores de calorias, proteínas, carboidratos e gorduras. Responda APENAS com JSON válido, no formato: { "alimentos": [ { "nome": string, "quantidade": number, "calorias": number, "proteinas": number, "carboidratos": number, "gorduras": number } ] }',
+          },
           {
             role: 'user',
             content: [
-              { type: 'text', text: prompt },
+              { type: 'text', text: 'Analise esta refeição e retorne os alimentos detectados.' },
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:${req.file.mimetype};base64,${base64Image}`,
+                  url: `data:image/jpeg;base64,${base64Image}`,
                 },
               },
             ],
           },
         ],
-        temperature: 0.7,
-        max_tokens: 1000,
+        max_tokens: 600,
       },
       {
         headers: {
@@ -158,83 +147,72 @@ Responda APENAS com JSON válido, sem markdown, no formato:
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error('Falha ao extrair JSON da resposta de imagem');
       return res.status(500).json({
         sucesso: false,
-        error: 'Não foi possível interpretar a resposta da IA para a análise da refeição.',
-        analise: { alimentos: [] },
+        error: 'Não foi possível interpretar a resposta da IA para análise da imagem.',
       });
     }
 
-    const analise = JSON.parse(jsonMatch[0]);
-    return res.json({ sucesso: true, analise });
+    const data = JSON.parse(jsonMatch[0]);
+    return res.json({ sucesso: true, alimentos: data.alimentos || [] });
   } catch (error) {
     console.error('[ERRO ANALISAR IMAGEM]', error.message);
     if (error.response) {
-      console.error('Status OpenAI:', error.response.status);
-      console.error('Data OpenAI:', error.response.data);
       return res.status(500).json({
         sucesso: false,
         error:
           error.response.data?.error?.message ||
           'Erro na API da OpenAI ao analisar imagem.',
-        analise: { alimentos: [] },
       });
     }
     res.status(500).json({
       sucesso: false,
       error: 'Erro interno no servidor ao analisar imagem.',
       detalhes: error.message,
-      analise: { alimentos: [] },
     });
   }
 });
 
-// ---------- Rota: GERAR TREINO ----------
+// ---------- Gerar Treino ----------
 app.post('/api/gerar-treino', async (req, res) => {
-  const { userProfile, prompt: promptDireto } = req.body;
-
-  if (!apiKey) {
-    console.error('OPENAI_API_KEY não configurada.');
-    return res.status(500).json({ error: 'Chave da API OpenAI não configurada no servidor.' });
-  }
-
-  // Dois modos de uso:
-  // 1) front manda userProfile (seu app onboarding/profile)
-  // 2) front manda um "prompt" pronto (caso da tela index.tsx atual)
-  let prompt;
-
-  if (promptDireto) {
-    prompt = promptDireto;
-  } else if (userProfile) {
-    prompt = `Gere um plano de treino semanal completo e detalhado para o usuário abaixo.
-
-Perfil:
-- Idade: ${userProfile.idade} anos
-- Sexo: ${userProfile.sexo}
-- Altura: ${userProfile.altura} cm
-- Peso: ${userProfile.peso} kg
-- Objetivo: ${userProfile.objetivo}
-- Nível de treino: ${userProfile.nivel}
-
-Saída obrigatória: um ARRAY JSON de dias de treino.
-Cada elemento do array deve ter:
-{
-  "dia": "Dia 1 - Peito e Tríceps",
-  "foco": "Peito, Tríceps",
-  "exercicios": [
-    { "nome": "Supino Reto com Barra", "series": "3-4", "repeticoes": "8-12", "descanso": "60-90 segundos" }
-  ]
-}
-
-Responda APENAS com o array JSON (começando em "[" e terminando em "]"), sem texto antes ou depois.`;
-  } else {
-    return res
-      .status(400)
-      .json({ error: 'Envie "userProfile" ou um "prompt" direto para gerar treino.' });
-  }
-
   try {
+    const { prompt, userProfile } = req.body;
+
+    if (!apiKey) {
+      return res.status(500).json({
+        error: 'Chave da OpenAI não configurada.',
+      });
+    }
+
+    // Se vier prompt direto do app (seu index.tsx já manda um prompt pronto)
+    const userPrompt = prompt
+      ? prompt
+      : `Gere um plano de treino semanal detalhado em JSON para este usuário:
+Nome: ${userProfile?.nome}
+Sexo: ${userProfile?.sexo}
+Idade: ${userProfile?.idade}
+Peso: ${userProfile?.peso}
+Altura: ${userProfile?.altura}
+Objetivo: ${userProfile?.objetivo}
+Nível: ${userProfile?.nivel}
+
+Responda APENAS com JSON, no formato:
+[
+  {
+    "dia": "Segunda-feira",
+    "gruposMusculares": ["Peito", "Tríceps"],
+    "exercicios": [
+      {
+        "nome": "Supino reto com barra",
+        "series": "4",
+        "repeticoes": "8-12",
+        "descanso": "90 segundos",
+        "descricao": "texto..."
+      }
+    ]
+  }
+]`;
+
     const openaiResp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -243,12 +221,12 @@ Responda APENAS com o array JSON (começando em "[" e terminando em "]"), sem te
           {
             role: 'system',
             content:
-              'Você é um treinador experiente. Gere treinos estruturados em JSON. Responda APENAS com JSON válido, sem markdown.',
+              'Você é um treinador experiente. Gere planos de treino estruturados em JSON. Responda APENAS com JSON válido, sem markdown.',
           },
-          { role: 'user', content: prompt },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
-        max_tokens: 2000,
+        max_tokens: 1500,
       },
       {
         headers: {
@@ -262,26 +240,24 @@ Responda APENAS com o array JSON (começando em "[" e terminando em "]"), sem te
     const content = openaiResp.data.choices[0].message.content || '';
     console.log('[GERAR TREINO] Resposta bruta:', content);
 
-    // Aqui esperamos um ARRAY JSON, então buscamos por algo que começa com "[" e termina com "]"
+    // A IA responde um ARRAY JSON, então capturamos um bloco que começa com [ e termina com ]
     const jsonMatch = content.match(/|
 $
 [\s\S]*
 $
 |/);
     if (!jsonMatch) {
-      console.error('Falha ao extrair array JSON do treino');
-      return res
-        .status(500)
-        .json({ error: 'Não foi possível interpretar a resposta da IA para o treino.' });
+      return res.status(500).json({
+        sucesso: false,
+        error: 'Não foi possível interpretar a resposta da IA para o treino.',
+      });
     }
 
-    const treino = JSON.parse(jsonMatch[0]); // deve ser um array de dias
+    const treino = JSON.parse(jsonMatch[0]);
     return res.json({ sucesso: true, treino });
   } catch (error) {
     console.error('[ERRO GERAR TREINO]', error.message);
     if (error.response) {
-      console.error('Status OpenAI:', error.response.status);
-      console.error('Data OpenAI:', error.response.data);
       return res.status(500).json({
         error:
           error.response.data?.error?.message ||
@@ -292,12 +268,14 @@ $
   }
 });
 
-// ---------- Rota: BUSCAR ALIMENTO ----------
+// ---------- Buscar Alimento ----------
 app.post('/api/buscar-alimento', async (req, res) => {
   const { termo } = req.body;
 
   if (!termo) {
-    return res.status(400).json({ sucesso: false, error: 'Termo de busca não fornecido.' });
+    return res
+      .status(400)
+      .json({ sucesso: false, error: 'Termo de busca não fornecido.' });
   }
 
   if (!apiKey) {
@@ -309,7 +287,6 @@ app.post('/api/buscar-alimento', async (req, res) => {
 
   try {
     const prompt = `Liste 5 alimentos relacionados a "${termo}", com suas calorias, proteínas, carboidratos e gorduras por 100g.
-
 Responda APENAS com JSON válido, sem markdown, no formato:
 {
   "alimentos": [
@@ -346,7 +323,6 @@ Responda APENAS com JSON válido, sem markdown, no formato:
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error('Falha ao extrair JSON da resposta de busca');
       return res.status(500).json({
         sucesso: false,
         error: 'Não foi possível interpretar a resposta da IA para a busca de alimentos.',
@@ -371,8 +347,6 @@ Responda APENAS com JSON válido, sem markdown, no formato:
   } catch (error) {
     console.error('[ERRO BUSCAR ALIMENTO]', error.message);
     if (error.response) {
-      console.error('Status OpenAI:', error.response.status);
-      console.error('Data OpenAI:', error.response.data);
       return res.status(500).json({
         sucesso: false,
         error:
@@ -390,7 +364,6 @@ Responda APENAS com JSON válido, sem markdown, no formato:
   }
 });
 
-// ---------- Sobe servidor ----------
 app.listen(PORT, () => {
   console.log(`Backend FitGenius rodando na porta ${PORT}`);
 });
